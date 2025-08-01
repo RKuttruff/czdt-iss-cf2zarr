@@ -130,10 +130,15 @@ def main(args):
     compressor = Blosc(cname="blosclz", clevel=9)
     encoding = {vname: {'compressor': compressor} for vname in ds.data_vars}
 
-    print(f'Writing to zarr file: {os.path.join("output", output)}')
+    if output.startswith('s3://'):
+        output_path = output
+    else:
+        output_path = os.path.join('output', output)
+
+    print(f'Writing zarr to {output_path}')
 
     ds.to_zarr(
-        os.path.join('output', output),
+        output_path,
         mode='w-',
         encoding=encoding,
         consolidated=True,

@@ -271,10 +271,15 @@ def main(args):
         for var in final_ds.data_vars:
             encoding[var]['fill_value'] = config['nodata']
 
-    print(f'Writing to zarr file: {os.path.join("output", output)}')
+    if output.startswith('s3://'):
+        output_path = output
+    else:
+        output_path = os.path.join('output', output)
+
+    print(f'Writing zarr to {output_path}')
 
     final_ds.to_zarr(
-        os.path.join('output', output),
+        output_path,
         mode='w-',
         encoding=encoding,
         consolidated=True,
