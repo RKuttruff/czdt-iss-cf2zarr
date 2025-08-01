@@ -234,6 +234,7 @@ def convert_timeslice_to_cog(input_data: DataArray, time, var_name, lat_c, lon_c
     data.rio.to_raster(out_path, driver='COG', sharing=False, **DRIVER_KWARGS)
     return data, out_path
 
+
 def main(args):
     zarr_url = args.zarr
     time_c = args.time

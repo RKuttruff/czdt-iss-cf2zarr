@@ -37,11 +37,11 @@ def __get_zarr_urls(args, client):
 def main(args):
     output = args.output
 
-    config = get_config(args.config)
-    dim = config['dimensions']['time']
-
     session = boto3.Session(profile_name=os.getenv('AWS_PROFILE', None))
     client = session.client('s3')
+
+    config = get_config(args.config, client)
+    dim = config['dimensions']['time']
 
     datasets = []
 

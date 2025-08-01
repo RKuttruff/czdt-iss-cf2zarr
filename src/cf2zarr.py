@@ -29,11 +29,11 @@ def main(args):
     for v in args.variables:
         variables.extend(v.split(','))
 
-    config = get_config(args.config)
-    dim = config['dimensions']['time']
-
     session = boto3.Session(profile_name=os.getenv('AWS_PROFILE', None))
     client = session.client('s3')
+
+    config = get_config(args.config, client)
+    dim = config['dimensions']['time']
 
     if args.zarr not in {'', 'none'}:
         credentials = session.get_credentials().get_frozen_credentials()

@@ -25,7 +25,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 SCHEMA_PATH = os.path.join(SCRIPT_DIR, 'schema', 'geotiff_schema.yaml')
 sys.path.append(os.path.dirname(SCRIPT_DIR))
 
-from src.util import stage_s3
+from src.util import stage_s3, get_config
 
 DT_UNITS = ['year', 'month', 'day', 'hour', 'minute', 'second', 'microsecond']
 UNIT_STARTS = dict(year=0, month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -126,13 +126,15 @@ def main(args):
     session = boto3.Session(profile_name=os.getenv('AWS_PROFILE', None))
     client = session.client('s3')
 
-    schema = yamale.make_schema(SCHEMA_PATH, validators=VALIDATORS)
-    data = yamale.make_data(config_path)
+    # schema = yamale.make_schema(SCHEMA_PATH, validators=VALIDATORS)
+    # data = yamale.make_data(config_path)
+    #
+    # yamale.validate(schema, data, strict=True)
+    #
+    # with open(config_path, 'r') as fp:
+    #     config = yaml.safe_load(fp)
 
-    yamale.validate(schema, data, strict=True)
-
-    with open(config_path, 'r') as fp:
-        config = yaml.safe_load(fp)
+    config = get_config(config_path, client, schema_path=SCHEMA_PATH, schema_validators=VALIDATORS, raw=True)
 
     input_stage_dir = stage_s3(args.input_s3, client)
     staging_dirs.append(input_stage_dir)

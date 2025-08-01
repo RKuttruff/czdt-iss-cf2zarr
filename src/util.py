@@ -33,12 +33,48 @@ DEFAULT_CONFIG = {
 }
 
 
-def get_config(path: str) -> dict:
+def _localize_config(url: str, client) -> str:
+    """
+    Ensure the config file is on the local fs. For local files, this is a no-op. For S3 URLs,
+    download to a temporary location.
+
+    :param url: URL or path of the config file
+    :param client: S3 client
+    :return: Localized config file path
+    """
+
+    parsed_url = urlparse(url)
+
+    if parsed_url.scheme in {'file', ''}:
+        return url.removeprefix('file://')
+    elif parsed_url.scheme == 's3':
+        fd, local_file = tempfile.mkstemp(prefix='config', suffix='_temp.yaml')
+
+        with os.fdopen(fd, 'w') as f:
+            client.download_fileobj(parsed_url.netloc, parsed_url.path.lstrip('/'), f)
+
+        return local_file
+    else:
+        raise ValueError(f'Unsupported URL scheme: {parsed_url.scheme}')
+
+
+def get_config(
+        path: str,
+        client,
+        schema_path: str = None,
+        schema_validators=None,
+        raw=False
+) -> dict:
     if path is None:
         print('No config file provided, using default')
         config = DEFAULT_CONFIG
     else:
-        schema = yamale.make_schema(SCHEMA_PATH)
+        path = _localize_config(path, client)
+
+        if schema_path is None:
+            schema_path = SCHEMA_PATH
+
+        schema = yamale.make_schema(schema_path, validators=schema_validators)
         data = yamale.make_data(path)
 
         yamale.validate(schema, data, strict=True)
@@ -48,12 +84,15 @@ def get_config(path: str) -> dict:
 
         print(f'Validated and loaded config from {path}')
 
-        config = {
-            'chunks': config_data['chunks'],
-            'dimensions': config_data.get('dimensions', DEFAULT_CONFIG['dimensions']),
-        }
+        if not raw:
+            config = {
+                'chunks': config_data['chunks'],
+                'dimensions': config_data.get('dimensions', DEFAULT_CONFIG['dimensions']),
+            }
 
-        config['coordinates'] = config_data.get('coordinates', config['dimensions'])
+            config['coordinates'] = config_data.get('coordinates', config['dimensions'])
+        else:
+            config = config_data
 
     print(f'Final config:\n{json.dumps(config, indent=2)}')
 
