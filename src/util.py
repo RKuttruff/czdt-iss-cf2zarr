@@ -50,7 +50,7 @@ def _localize_config(url: str, client) -> str:
     elif parsed_url.scheme == 's3':
         fd, local_file = tempfile.mkstemp(prefix='config', suffix='_temp.yaml')
 
-        with os.fdopen(fd, 'w') as f:
+        with os.fdopen(fd, 'wb') as f:
             client.download_fileobj(parsed_url.netloc, parsed_url.path.lstrip('/'), f)
 
         return local_file
