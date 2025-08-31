@@ -1,0 +1,14 @@
+name: cbef_notebook
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python<3.13
+  - psutil
+  - pydap
+  - numpy
+  - xarray
+  - cftime
+  - xesmf>=0.7
+  - jupyter
+  - dask

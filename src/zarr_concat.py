@@ -13,6 +13,7 @@ import pandas as pd
 import xarray as xr
 
 from zarr.codecs import BloscCodec as Blosc
+from numcodecs.blosc import Blosc as BloscZ2
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(SCRIPT_DIR))
@@ -105,30 +106,48 @@ def main(args):
 
     chunk_config = {config['dimensions'][d]: config['chunks'][d] for d in config['chunks']}
 
-    # exit()
-
     print(f'Setting chunk config: {chunk_config}')
 
     for var in ds.data_vars:
         ds[var] = ds[var].chunk(chunk_config)
 
-    compressor = Blosc(cname="blosclz", clevel=9)
-    encoding = {vname: {'compressor': compressor} for vname in ds.data_vars}
+    if args.zarr_version == 3:
+        compressor = Blosc(cname="blosclz", clevel=9)
+        encoding = {vname: {'compressors': [compressor]} for vname in ds.data_vars}
+        to_zarr_kwargs = {}
+    else:
+        # TODO: There MUST be a much better way to detect we're converting from Zarr3 to Zarr2
+        #  which requires clearing all encoding settings (leaving _FillValue since I think it may be important)
+        if 'serializer' in ds[list(ds.data_vars)[0]].encoding:
+            print('Detected conversion of zarr v3 data to zarr v2, clearing encoding data')
+
+            for var in ds.variables:
+                ds[var].encoding = {enc: ds[var].encoding[enc] for enc in ds[var].encoding if enc == '_FillValue'}
+
+        compressor = BloscZ2(cname="blosclz", clevel=9)
+        encoding = {vname: {'compressor': compressor} for vname in ds.data_vars}
+        to_zarr_kwargs = {
+            'consolidated': True
+        }
 
     if output.startswith('s3://'):
         output_path = output
     else:
         output_path = os.path.join('output', output)
 
-    print(f'Writing zarr to {output_path}')
+    print(f'Writing to zarr (v{args.zarr_version}) file: {output_path}')
 
-    ds.to_zarr(
-        output_path,
-        mode='w-',
-        encoding=encoding,
-        consolidated=True,
-        write_empty_chunks=False
-    )
+    import warnings
+
+    with warnings.catch_warnings(action='ignore'):
+        ds.to_zarr(
+            output_path,
+            mode='w-',
+            encoding=encoding,
+            write_empty_chunks=False,
+            zarr_format=args.zarr_version,
+            **to_zarr_kwargs
+        )
 
 
 if __name__ == '__main__':
@@ -168,6 +187,14 @@ if __name__ == '__main__':
         default=None,
         help='If set, this is the maximum difference in max-min time of the output dataset. Defined as an ISO 8601 '
              'Duration (or anything else parseable by pandas.Timedelta)'
+    )
+
+    parser.add_argument(
+        '-v', '--zarr-version',
+        type=int,
+        choices=[2, 3],
+        default=3,
+        help='Version of zarr standard to output'
     )
 
     parser.add_argument(
