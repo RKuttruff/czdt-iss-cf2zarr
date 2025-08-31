@@ -10,6 +10,7 @@ import pandas as pd
 import xarray as xr
 
 from zarr.codecs import BloscCodec as Blosc
+from numcodecs.blosc import Blosc as BloscZ2
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(SCRIPT_DIR))
@@ -28,6 +29,11 @@ def main(args):
 
     for v in args.variables:
         variables.extend(v.split(','))
+
+    group_variables = []
+
+    for v in args.group_variables:
+        group_variables.extend(v.split(','))
 
     session = boto3.Session(profile_name=os.getenv('AWS_PROFILE', None))
     client = session.client('s3')
@@ -56,9 +62,11 @@ def main(args):
 
     if variables is None:
         variables = []
+    if variables is None:
+        variables = []
 
     variable_name = list(new_ds.data_vars.keys())[0]  # Automatically pick the first variable
-    if len(variables) == 0:
+    if len(variables) == 0 and len(group_variables) == 0:
         if ds is None:
             variables = [variable_name]
         else:
@@ -70,6 +78,18 @@ def main(args):
     if variables:
         print(f'Subselecting vars: {variables}')
         new_ds = new_ds[variables]
+
+    if group_variables:
+        group_cache = {}
+
+        for gv in group_variables:
+            group, variable = gv.rsplit('/', 1)
+
+            if group not in group_cache:
+                group_ds = xr.open_mfdataset(os.path.join(input_stage_dir, pattern), group=group).sortby(dim)
+                group_cache[group] = group_ds
+
+            new_ds[variable] = group_cache[group][variable]
 
     if ds is not None:
         ds = xr.concat((ds, new_ds), dim=dim).sortby(dim)
@@ -120,30 +140,48 @@ def main(args):
 
     chunk_config = {config['dimensions'][d]: config['chunks'][d] for d in config['chunks']}
 
-    # exit()
-
     print(f'Setting chunk config: {chunk_config}')
 
     for var in ds.data_vars:
         ds[var] = ds[var].chunk(chunk_config)
 
-    compressor = Blosc(cname="blosclz", clevel=9)
-    encoding = {vname: {'compressor': compressor} for vname in ds.data_vars}
+    if args.zarr_version == 3:
+        compressor = Blosc(cname="blosclz", clevel=9)
+        encoding = {vname: {'compressors': [compressor]} for vname in ds.data_vars}
+        to_zarr_kwargs = {}
+    else:
+        # TODO: There MUST be a much better way to detect we're converting from Zarr3 to Zarr2
+        #  which requires clearing all encoding settings (leaving _FillValue since I think it may be important)
+        if 'serializer' in ds[list(ds.data_vars)[0]].encoding:
+            print('Detected conversion of zarr v3 data to zarr v2, clearing encoding data')
+
+            for var in ds.variables:
+                ds[var].encoding = {enc: ds[var].encoding[enc] for enc in ds[var].encoding if enc == '_FillValue'}
+
+        compressor = BloscZ2(cname="blosclz", clevel=9)
+        encoding = {vname: {'compressor': compressor} for vname in ds.data_vars}
+        to_zarr_kwargs = {
+            'consolidated': True
+        }
 
     if output.startswith('s3://'):
         output_path = output
     else:
         output_path = os.path.join('output', output)
 
-    print(f'Writing zarr to {output_path}')
+    print(f'Writing to zarr (v{args.zarr_version}) file: {output_path}')
 
-    ds.to_zarr(
-        output_path,
-        mode='w-',
-        encoding=encoding,
-        consolidated=True,
-        write_empty_chunks=False
-    )
+    import warnings
+
+    with warnings.catch_warnings(action='ignore'):
+        ds.to_zarr(
+            output_path,
+            mode='w-',
+            encoding=encoding,
+            write_empty_chunks=False,
+            zarr_format=args.zarr_version,
+            **to_zarr_kwargs
+        )
 
 
 if __name__ == '__main__':
@@ -202,6 +240,21 @@ if __name__ == '__main__':
         required=False,
         nargs='*',
         help='Variables to convert'
+    )
+
+    parser.add_argument(
+        '--group-variables',
+        required=False,
+        nargs='*',
+        help='Variables to convert'
+    )
+
+    parser.add_argument(
+        '-v', '--zarr-version',
+        type=int,
+        choices=[2, 3],
+        default=3,
+        help='Version of zarr standard to output'
     )
 
     args = parser.parse_args()
