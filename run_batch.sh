@@ -1,4 +1,4 @@
 #!/bin/bash
 
 
-python src/$1.py ${@:2}
+python -u src/$1.py ${@:2}

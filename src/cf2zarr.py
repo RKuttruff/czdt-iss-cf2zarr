@@ -27,6 +27,12 @@ def main(args):
 
     variables = []
 
+    if args.variables is None:
+        args.variables = []
+
+    if args.group_variables is None:
+        args.group_variables = []
+
     for v in args.variables:
         variables.extend(v.split(','))
 
@@ -56,7 +62,7 @@ def main(args):
 
     input_stage_dir = stage_s3(args.input_s3, client)
 
-    new_ds = xr.open_mfdataset(os.path.join(input_stage_dir, pattern)).sortby(dim)
+    new_ds = xr.open_mfdataset(os.path.join(input_stage_dir, pattern))
     print('Opened new dataset from input NetCDF files')
     print(new_ds)
 
@@ -66,11 +72,14 @@ def main(args):
         variables = []
 
     variable_name = list(new_ds.data_vars.keys())[0]  # Automatically pick the first variable
-    if len(variables) == 0 and len(group_variables) == 0:
-        if ds is None:
-            variables = [variable_name]
+    if len(variables) == 0:
+        if len(group_variables) == 0:
+            if ds is None:
+                variables = [variable_name]
+            else:
+                variables = list(ds.data_vars)
         else:
-            variables = list(ds.data_vars)
+            variables = []
     elif variables[0] == '*':
         print('All variables selected - skipping subselection')
         variables = []
@@ -79,6 +88,12 @@ def main(args):
         print(f'Subselecting vars: {variables}')
         new_ds = new_ds[variables]
 
+    if (len(variables) == 0) and (len(group_variables) > 0):
+        print('Clearing root variables')
+        new_ds = new_ds[list(new_ds.coords)]
+
+    print(new_ds)
+
     if group_variables:
         group_cache = {}
 
@@ -86,17 +101,24 @@ def main(args):
             group, variable = gv.rsplit('/', 1)
 
             if group not in group_cache:
-                group_ds = xr.open_mfdataset(os.path.join(input_stage_dir, pattern), group=group).sortby(dim)
+                group_ds = xr.open_mfdataset(
+                    os.path.join(input_stage_dir, pattern),
+                    group=group,
+                    combine='nested',
+                    concat_dim='time'
+                )
                 group_cache[group] = group_ds
 
             new_ds[variable] = group_cache[group][variable]
+
+        print(new_ds)
 
     if ds is not None:
         ds = xr.concat((ds, new_ds), dim=dim).sortby(dim)
         print('Concatenated datasets')
         print(ds)
     else:
-        ds = new_ds
+        ds = new_ds.sortby(dim)
 
     time_coord = config['coordinates']['time']
 
